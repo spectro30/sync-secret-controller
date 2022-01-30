@@ -17,25 +17,39 @@ limitations under the License.
 package v1
 
 import (
+	core "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+// NamespaceRef contains the namespace
+type NamespaceRef string
+
+// SyncPhase refers the phase
+// +kubebuilder:validation:Enum=Provisioning;Syncing;NotSyncing;
+type SyncPhase string
+
 // SecretSyncSpec defines the desired state of SecretSync
 type SecretSyncSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// SourceRef is the name of source secret to be synced
+	SourceRef core.SecretReference `json:"sourceRef"`
 
-	// Foo is an example field of SecretSync. Edit secretsync_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	// TargetNamespaces is an array of namespaces where the secrets will be synced
+	TargetNamespaces []NamespaceRef `json:"targetNamespaces"`
+
+	// This flag tells the controller to pause the sync.
+	// Defaults to false.
+	// +optional
+	Pause *bool `json:"pause,omitempty"`
 }
 
 // SecretSyncStatus defines the observed state of SecretSync
 type SecretSyncStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	/// Specifies the current phase of the secret sync
+	// +optional
+	Phase SyncPhase `json:"phase,omitempty"`
 }
 
 //+kubebuilder:object:root=true
