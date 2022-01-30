@@ -1,0 +1,6 @@
+domain: my.domain
+layout:
+- go.kubebuilder.io/v3
+projectName: sync-secret-controller
+repo: my.domain/sync-secret-controller
+version: "3"
