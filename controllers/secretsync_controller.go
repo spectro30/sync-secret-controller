@@ -18,9 +18,14 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	core "k8s.io/api/core/v1"
+	kerr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -69,12 +74,19 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	var sourceSecret core.Secret
-	if err := r.Get(ctx, types.NamespacedName{
+	err := r.Get(ctx, types.NamespacedName{
 		Namespace: secretSync.Spec.SourceRef.Namespace,
 		Name:      secretSync.Spec.SourceRef.Name,
-	}, &sourceSecret); err != nil {
+	}, &sourceSecret)
+
+	if err != nil && !kerr.IsNotFound(err) {
 		log.Error(err, "unable to fetch Secret")
 		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
+
+	toBeDeleted := false
+	if err != nil {
+		toBeDeleted = true
 	}
 
 	createNameSpacedSecret := func(sourceSecret *core.Secret, namespace syncv1.NamespaceRef) (*core.Secret, error) {
@@ -89,17 +101,39 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	for _, namespace := range secretSync.Spec.TargetNamespaces {
-		newSecret, err := createNameSpacedSecret(&sourceSecret, namespace)
-		log.Info("the namespace is", "namespace", namespace)
-		if err != nil {
-			log.Error(err, "unable to construct secret from template")
-			// don't bother requeuing until we get a change to the spec
-			return ctrl.Result{RequeueAfter: time.Minute}, nil
+		if toBeDeleted {
+			var tempSecret core.Secret
+			err := r.Get(ctx, types.NamespacedName{
+				Namespace: string(namespace),
+				Name:      secretSync.Spec.SourceRef.Name,
+			}, &tempSecret)
+			if err != nil {
+				_ = r.Delete(ctx, &tempSecret)
+				log.V(1).Info("delete secret for", "source secret", tempSecret.Name)
+			}
+		} else {
+			newSecret, err := createNameSpacedSecret(&sourceSecret, namespace)
+			if err != nil {
+				log.Error(err, "unable to construct secret from template")
+				// don't bother requeuing until we get a change to the spec
+				return ctrl.Result{RequeueAfter: time.Minute}, nil
+			}
+
+			var tempSecret core.Secret
+			err = r.Get(ctx, types.NamespacedName{
+				Namespace: string(namespace),
+				Name:      secretSync.Spec.SourceRef.Name,
+			}, &tempSecret)
+
+			if err == nil {
+				log.V(1).Info("secret already present", "source secret", newSecret.Name)
+			} else {
+				if err := r.Create(ctx, newSecret); err != nil {
+					log.Error(err, "unable to create secret for SecretSync")
+				}
+				log.V(1).Info("created secret for", "source secret", newSecret.Name)
+			}
 		}
-		if err := r.Create(ctx, newSecret); err != nil {
-			log.Error(err, "unable to create secret for SecretSync")
-		}
-		log.V(1).Info("created secret for", "source secret", newSecret.Name)
 	}
 
 	return ctrl.Result{}, nil
@@ -107,8 +141,34 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *SecretSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	secretHandler := handler.EnqueueRequestsFromMapFunc(func(a client.Object) []reconcile.Request {
+		fmt.Println("Secret Handler Summoned")
+		secretSyncs := &syncv1.SecretSyncList{}
+		if err := r.List(context.Background(), secretSyncs); err != nil {
+			return nil
+		}
+		var req []reconcile.Request
+		for _, c := range secretSyncs.Items {
+			if c.Spec.SourceRef.Name == a.GetName() && c.Spec.SourceRef.Namespace == a.GetNamespace() {
+				secret := &core.Secret{}
+
+				if err := r.Get(context.Background(), types.NamespacedName{
+					Namespace: a.GetNamespace(),
+					Name:      a.GetName(),
+				}, secret); err != nil {
+					return nil
+				}
+				req = append(req, reconcile.Request{NamespacedName: types.NamespacedName{
+					Namespace: c.Namespace,
+					Name:      c.Name,
+				}})
+			}
+		}
+		return req
+	})
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&syncv1.SecretSync{}).
-		Owns(&core.Secret{}).
+		Watches(&source.Kind{Type: &core.Secret{}}, secretHandler).
 		Complete(r)
 }
