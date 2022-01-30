@@ -1,0 +1,16 @@
+domain: spectro30
+layout:
+- go.kubebuilder.io/v3
+projectName: sync-secret-controller
+repo: github.com/spectro30/sync-secret-controller
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: spectro30
+  group: sync
+  kind: SecretSync
+  path: github.com/spectro30/sync-secret-controller/api/v1
+  version: v1
+version: "3"
