@@ -93,8 +93,8 @@ func (in *SecretSyncSpec) DeepCopyInto(out *SecretSyncSpec) {
 		*out = make([]NamespaceRef, len(*in))
 		copy(*out, *in)
 	}
-	if in.Pause != nil {
-		in, out := &in.Pause, &out.Pause
+	if in.Paused != nil {
+		in, out := &in.Paused, &out.Paused
 		*out = new(bool)
 		**out = **in
 	}

@@ -42,7 +42,7 @@ type SecretSyncSpec struct {
 	// This flag tells the controller to pause the sync.
 	// Defaults to false.
 	// +optional
-	Pause *bool `json:"pause,omitempty"`
+	Paused *bool `json:"pause,omitempty"`
 }
 
 // SecretSyncStatus defines the observed state of SecretSync
