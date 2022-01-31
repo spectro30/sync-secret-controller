@@ -21,14 +21,18 @@ import (
 	core "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	clientutil "kmodules.xyz/client-go/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 	"time"
 
+	syncv1 "github.com/spectro30/sync-secret-controller/api/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	syncv1 "github.com/spectro30/sync-secret-controller/api/v1"
 )
 
 // SecretSyncReconciler reconciles a SecretSync object
@@ -55,14 +59,20 @@ type SecretSyncReconciler struct {
 func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	var secretSync syncv1.SecretSync
-	if err := r.Get(ctx, req.NamespacedName, &secretSync); err != nil {
-		log.Error(err, "unable to fetch SecretSync")
-		// we'll ignore not-found errors, since they can't be fixed by an immediate
-		// requeue (we'll need to wait for a new notification), and we can get them
-		// on deleted requests.
+	err := r.Get(ctx, req.NamespacedName, &secretSync)
+	if secretSync.Status.Synced != nil && *secretSync.Status.Synced == true {
+
+	} else{
+		log.Info("failed to get targeted secret or is not present")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	if err != nil && errors.IsNotFound(err){
 
+
+	} else if err != nil {
+
+		return ctrl.Result{}, err
+	}
 	if secretSync.Spec.Paused != nil && *secretSync.Spec.Paused {
 		log.V(1).Info("secretSync suspended, skipping")
 		return ctrl.Result{}, nil
@@ -73,33 +83,34 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		Namespace: secretSync.Spec.SourceRef.Namespace,
 		Name:      secretSync.Spec.SourceRef.Name,
 	}, &sourceSecret); err != nil {
-		log.Error(err, "unable to fetch Secret")
-		return ctrl.Result{RequeueAfter: time.Minute}, err
+		log.Info("unable to fetch Secret")
+		return ctrl.Result{RequeueAfter: time.Minute}, client.IgnoreNotFound(err)
 	}
 
-	createNameSpacedSecret := func(sourceSecret *core.Secret, namespace syncv1.NamespaceRef) (*core.Secret, error) {
-		newSecret := &core.Secret{
+	for _, namespace := range secretSync.Spec.TargetNamespaces {
+		_, vtype, err := clientutil.CreateOrPatch(r.Client, &core.Secret{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      sourceSecret.Name,
 				Namespace: string(namespace),
 			},
-			Data: sourceSecret.Data,
-		}
-		return newSecret, nil
-	}
+		}, func(obj client.Object, createOp bool) client.Object {
+			secret := obj.(*core.Secret)
+			secret.Labels = sourceSecret.Labels
+			secret.Type = core.SecretTypeOpaque
+			secret.Data = sourceSecret.Data
+			return secret
+		})
 
-	for _, namespace := range secretSync.Spec.TargetNamespaces {
-		newSecret, err := createNameSpacedSecret(&sourceSecret, namespace)
-		log.Info("the namespace is", "namespace", namespace)
 		if err != nil {
-			log.Error(err, "unable to construct secret from template")
-			// don't bother requeuing until we get a change to the spec
-			return ctrl.Result{RequeueAfter: time.Minute}, nil
+			log.Error(err, "config secret createorpatch failed")
+			return ctrl.Result{RequeueAfter: time.Minute}, err
 		}
-		if err := r.Create(ctx, newSecret); err != nil {
-			log.Error(err, "unable to create secret for SecretSync")
-		}
-		log.V(1).Info("created secret for", "source secret", newSecret.Name)
+		falseValue := false
+		secretSync.Status.Synced = &falseValue
+
+		log.Info("Secret type ", "is", vtype)
+
+		log.V(1).Info("created secret for", "source secret", sourceSecret.Name)
 	}
 
 	return ctrl.Result{}, nil
@@ -109,6 +120,31 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 func (r *SecretSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&syncv1.SecretSync{}).
-		Owns(&core.Secret{}).
+		Watches(&source.Kind{Type: &core.Secret{}}, handler.EnqueueRequestsFromMapFunc(r.getHandlerFuncForSecret())).
 		Complete(r)
+}
+
+func (r *SecretSyncReconciler) getHandlerFuncForSecret() handler.MapFunc {
+	return func(object client.Object) []reconcile.Request {
+		obj := object.(*core.Secret)
+		var syncers syncv1.SecretSyncList
+		var reqs []reconcile.Request
+
+		// Listing from all namespaces
+		err := r.Client.List(context.TODO(), &syncers, &client.ListOptions{})
+		if err != nil {
+			return reqs
+		}
+		for _, syncer := range syncers.Items {
+			if syncer.Spec.SourceRef.Name == obj.Name {
+				reqs = append(reqs, reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name:      syncer.Name,
+						Namespace: syncer.Namespace,
+					},
+				})
+			}
+		}
+		return reqs
+	}
 }

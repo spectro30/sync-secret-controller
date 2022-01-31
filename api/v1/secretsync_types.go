@@ -28,7 +28,7 @@ import (
 type NamespaceRef string
 
 // SyncPhase refers the phase
-// +kubebuilder:validation:Enum=Provisioning;Syncing;NotSyncing;
+// +kubebuilder:validation:Enum=Synced;Syncing;NotSyncing;
 type SyncPhase string
 
 // SecretSyncSpec defines the desired state of SecretSync
@@ -50,6 +50,9 @@ type SecretSyncStatus struct {
 	/// Specifies the current phase of the secret sync
 	// +optional
 	Phase SyncPhase `json:"phase,omitempty"`
+
+	// Synced speficies if the secret is synced
+	Synced *bool `json:"synced"`
 }
 
 //+kubebuilder:object:root=true

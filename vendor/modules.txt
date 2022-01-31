@@ -58,7 +58,7 @@ github.com/golang/protobuf/ptypes
 github.com/golang/protobuf/ptypes/any
 github.com/golang/protobuf/ptypes/duration
 github.com/golang/protobuf/ptypes/timestamp
-# github.com/google/go-cmp v0.5.5
+# github.com/google/go-cmp v0.5.6
 ## explicit; go 1.8
 github.com/google/go-cmp/cmp
 github.com/google/go-cmp/cmp/internal/diff
@@ -547,6 +547,10 @@ k8s.io/utils/internal/third_party/forked/golang/net
 k8s.io/utils/net
 k8s.io/utils/pointer
 k8s.io/utils/trace
+# kmodules.xyz/client-go v0.0.0-20211119042047-bbc619ee4c49
+## explicit; go 1.17
+kmodules.xyz/client-go
+kmodules.xyz/client-go/client
 # sigs.k8s.io/controller-runtime v0.11.0
 ## explicit; go 1.17
 sigs.k8s.io/controller-runtime
